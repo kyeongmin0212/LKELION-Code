@@ -1,4 +1,4 @@
-public class Main {
+public class Mission00 {
     public static void main(String[] args) {
         System.out.println("Hello, LikeLion!");
         System.out.println("Welcome to Backend Course!");
