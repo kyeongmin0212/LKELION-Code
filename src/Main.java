@@ -3,5 +3,6 @@ public class Main {
         System.out.println("Hello, LikeLion!");
         System.out.println("Welcome to Backend Course!");
         System.out.println("Let's start coding with Java!");
+        System.out.println("Fighting! 🦁");
     }
 }
