@@ -5,11 +5,11 @@ public class Mission01 {
         Scanner scanner = new Scanner(System.in);
 
         int count = 0;
-        while (count < 5) {
-            System.out.print("아기사자 인원 수를 입력하세요: ");
+        while (count <= 0 || count >= 5) {
+            System.out.print("아기사자 인원 수를 입력하세요 (5명 미만): ");
             count = scanner.nextInt();
-            if (count < 5) {
-                System.out.println("5명 미만입니다. 다시 입력해주세요!");
+            if (count >= 5) {
+                System.out.println("5명 미만으로 입력해주세요!");
             }
         }
 
