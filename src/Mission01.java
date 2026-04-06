@@ -6,10 +6,10 @@ public class Mission01 {
 
         int count = 0;
         while (count < 5) {
-            System.out.print("아기사자 인원 수를 입력하세요 (5명 이상): ");
+            System.out.print("아기사자 인원 수를 입력하세요: ");
             count = scanner.nextInt();
             if (count < 5) {
-                System.out.println("5명 이상 입력해주세요!");
+                System.out.println("5명 미만입니다. 다시 입력해주세요!");
             }
         }
 
