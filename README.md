@@ -14,7 +14,7 @@
 | Mission 03 | 객체지향 II — 상속 / 다형성 / 추상화 | [src/mission03/](src/mission03/) |
 | Mission 04 | Java Collections & 설계 확장 | [src/mission04/](src/mission04/) |
 | Mission 05 | 자바로 배우는 IoC / DI | [src/mission05/](src/mission05/) |
-| Mission 06 | Spring Boot 전환 (IoC/DI → Spring 컨테이너) | [mission06/](mission06/) |
+| Mission 06 | Spring Boot 전환 (IoC/DI → Spring 컨테이너) | [src/mission06/](src/mission06/) |
 
 ---
 
@@ -372,8 +372,8 @@ java  -Dfile.encoding=UTF-8 -cp ../out mission05.Mission05
 
 | 항목 | 값 |
 |---|---|
-| 위치 | [mission06/](mission06/) |
-| 빌드 도구 | Maven (`mission06/pom.xml`) |
+| 위치 | [src/mission06/](src/mission06/) |
+| 빌드 도구 | Maven (`src/mission06/pom.xml`) |
 | Spring Boot | 3.3.5 |
 | Java | 17 |
 | 그룹 / 아티팩트 | `com.likelion` / `mission06` |
@@ -382,7 +382,7 @@ java  -Dfile.encoding=UTF-8 -cp ../out mission05.Mission05
 ### 패키지 구조
 
 ```
-mission06/
+src/mission06/
 ├── pom.xml                              ▶ Spring Boot 3.3.5 + spring-boot-starter-web
 └── src/main/
     ├── resources/
@@ -436,12 +436,12 @@ mission06/
 
 | 체크리스트 | 구현 위치 |
 |---|---|
-| Spring Boot 프로젝트(Spring Initializr)가 생성되었는가 | [mission06/pom.xml](mission06/pom.xml) — `spring-boot-starter-parent 3.3.5`, `spring-boot-starter-web` |
-| 5주차 코드가 Spring Boot 구조로 이전되었는가 | `src/mission05/*` → [mission06/src/main/java/com/likelion/mission06/](mission06/src/main/java/com/likelion/mission06/) 의 `domain / repository / service / policy / exception` 패키지 |
-| `@Service`, `@Repository` 어노테이션이 사용되었는가 | [LionService.java](mission06/src/main/java/com/likelion/mission06/service/LionService.java) (`@Service`), [MemoryLionRepository.java](mission06/src/main/java/com/likelion/mission06/repository/MemoryLionRepository.java) / [MockLionRepository.java](mission06/src/main/java/com/likelion/mission06/repository/MockLionRepository.java) (`@Repository`) |
+| Spring Boot 프로젝트(Spring Initializr)가 생성되었는가 | [src/mission06/pom.xml](src/mission06/pom.xml) — `spring-boot-starter-parent 3.3.5`, `spring-boot-starter-web` |
+| 5주차 코드가 Spring Boot 구조로 이전되었는가 | `src/mission05/*` → [src/mission06/src/main/java/com/likelion/mission06/](src/mission06/src/main/java/com/likelion/mission06/) 의 `domain / repository / service / policy / exception` 패키지 |
+| `@Service`, `@Repository` 어노테이션이 사용되었는가 | [LionService.java](src/mission06/src/main/java/com/likelion/mission06/service/LionService.java) (`@Service`), [MemoryLionRepository.java](src/mission06/src/main/java/com/likelion/mission06/repository/MemoryLionRepository.java) / [MockLionRepository.java](src/mission06/src/main/java/com/likelion/mission06/repository/MockLionRepository.java) (`@Repository`) |
 | 생성자 주입이 적용되어 있는가 | `LionService(LionRepository, IntroducePolicy)`, `HelloController(LionService)` — 모두 단일 생성자 + `final` 필드, setter 없음 |
-| `GET /hello` API 가 정상 동작하는가 | [HelloController.java](mission06/src/main/java/com/likelion/mission06/controller/HelloController.java) — `@GetMapping("/hello")` |
-| `@Configuration + @Bean` 수동 등록 또는 자동 등록 방식을 사용했는가 | **둘 다 사용**: [AppConfig.java](mission06/src/main/java/com/likelion/mission06/config/AppConfig.java) (`@Configuration + @Bean` 수동) + `@Service / @Repository / @RestController` (컴포넌트 스캔 자동) |
+| `GET /hello` API 가 정상 동작하는가 | [HelloController.java](src/mission06/src/main/java/com/likelion/mission06/controller/HelloController.java) — `@GetMapping("/hello")` |
+| `@Configuration + @Bean` 수동 등록 또는 자동 등록 방식을 사용했는가 | **둘 다 사용**: [AppConfig.java](src/mission06/src/main/java/com/likelion/mission06/config/AppConfig.java) (`@Configuration + @Bean` 수동) + `@Service / @Repository / @RestController` (컴포넌트 스캔 자동) |
 | GitHub README.md 에 본인 이름이 포함되었는가 | 본 문서 최상단 "작성자: 노경민" |
 
 ### 실행 방법
@@ -449,8 +449,8 @@ mission06/
 프로젝트에 **Maven Wrapper** 가 포함되어 있어 별도의 Maven 설치 없이 바로 빌드/실행할 수 있다 (JDK 17 만 필요).
 
 ```bash
-# 1) mission06 디렉터리로 이동
-cd mission06
+# 1) src/mission06 디렉터리로 이동
+cd src/mission06
 
 # 2) Spring Boot 실행 (Maven Wrapper)
 #    Windows PowerShell / cmd:
