@@ -14,6 +14,7 @@
 | Mission 03 | 객체지향 II — 상속 / 다형성 / 추상화 | [src/mission03/](src/mission03/) |
 | Mission 04 | Java Collections & 설계 확장 | [src/mission04/](src/mission04/) |
 | Mission 05 | 자바로 배우는 IoC / DI | [src/mission05/](src/mission05/) |
+| Mission 06 | Spring Boot 전환 (IoC/DI → Spring 컨테이너) | [mission06/](mission06/) |
 
 ---
 
@@ -355,3 +356,150 @@ java  -Dfile.encoding=UTF-8 -cp ../out mission05.Mission05
 3. **인터페이스 계약의 강제** — `LionRepository` 는 "save 는 중복이면 `DuplicateLionException` 을 던진다", "조회는 절대 null 을 반환하지 않는다" 같은 의미 규칙을 자바독으로 명시한다. 구현체(Memory / Mock) 가 무엇이든 호출 측은 한 가지 예외/리턴 규약만 알면 된다.
 4. **main 에 new 키워드 0건** — Mission05.main 은 `AppConfig.createLionService()` 만 호출하면 의존성 그래프가 통째로 조립된 `LionService` 를 받는다. Lion 인스턴스조차 `service.enroll(name, major, generation, Part.X)` 가 내부적으로 만들어주므로, main 에서 `BackendLion / FrontendLion / DesignLion` 같은 구체 클래스 이름이 한 번도 등장하지 않는다.
 5. **두 시나리오의 등가성** — `[A]` 운영 시나리오와 `[B]` 데모 시나리오는 호출하는 Service 메서드(`printRoster`, `printByPart`, `enroll` …)가 완전히 동일하다. 다른 결과를 내는 유일한 원인은 AppConfig 가 주입한 Repository 구현체뿐이다 — DI 가 약속하는 "구성(construction)과 사용(use)의 분리" 가 실증되는 지점이다.
+
+---
+
+## Mission 06 — Spring Boot 전환 (IoC/DI → Spring 컨테이너)
+
+### 목표
+- Spring Initializr 로 Spring Boot 프로젝트를 생성하고, Mission05 의 순수 자바 IoC/DI 코드를 그대로 이전한다.
+- 손코딩이었던 `AppConfig` 의 역할을 Spring 컨테이너에 넘긴다.
+- `@Service`, `@Repository` 어노테이션과 **생성자 주입** 을 적용한다.
+- `@Configuration + @Bean` 의 수동 등록 방식과 컴포넌트 스캔(자동 등록) 방식을 한 프로젝트 안에서 함께 사용한다.
+- 기본 웹 엔드포인트 `GET /hello` 를 노출해 부트가 정상 기동했는지 확인한다.
+
+### 프로젝트 위치 / 빌드 정보
+
+| 항목 | 값 |
+|---|---|
+| 위치 | [mission06/](mission06/) |
+| 빌드 도구 | Maven (`mission06/pom.xml`) |
+| Spring Boot | 3.3.5 |
+| Java | 17 |
+| 그룹 / 아티팩트 | `com.likelion` / `mission06` |
+| 베이스 패키지 | `com.likelion.mission06` |
+
+### 패키지 구조
+
+```
+mission06/
+├── pom.xml                              ▶ Spring Boot 3.3.5 + spring-boot-starter-web
+└── src/main/
+    ├── resources/
+    │   └── application.properties        ▶ 포트 8080
+    └── java/com/likelion/mission06/
+        ├── Mission06Application.java     ▶ @SpringBootApplication + CommandLineRunner 데모
+        ├── config/
+        │   └── AppConfig.java            ▶ @Configuration + @Bean (IntroducePolicy 수동 등록)
+        ├── controller/
+        │   └── HelloController.java      ▶ @RestController, GET /hello
+        ├── service/
+        │   └── LionService.java          ▶ @Service + 생성자 주입
+        ├── repository/
+        │   ├── LionRepository.java       ▶ (interface)
+        │   ├── MemoryLionRepository.java ▶ @Repository + @Primary (운영용 기본 구현체)
+        │   └── MockLionRepository.java   ▶ @Repository("mockLionRepository") (데모용 구현체)
+        ├── policy/
+        │   ├── IntroducePolicy.java      ▶ (interface)
+        │   └── StandardIntroducePolicy.java ▶ AppConfig 가 @Bean 으로 수동 등록
+        ├── domain/
+        │   ├── Lion.java                 ▶ (abstract) 도메인 객체 — 빈 아님
+        │   ├── BackendLion / FrontendLion / DesignLion
+        │   └── Part.java                 ▶ (enum)
+        └── exception/
+            └── DuplicateLionException.java
+```
+
+### 의존성 그래프 (Spring 컨테이너가 조립)
+
+```
+       @RestController HelloController
+                │  ctor inject
+                ▼
+            @Service LionService
+                │  ctor inject
+       ┌────────┴─────────┐
+       ▼                  ▼
+ LionRepository       IntroducePolicy
+       ▲                  ▲
+       │ @Primary         │ @Bean (AppConfig)
+       │                  │
+@Repository MemoryLionRepository    StandardIntroducePolicy
+@Repository("mockLionRepository") MockLionRepository
+```
+
+- `LionService` 는 생성자가 한 개이므로 Spring 이 `@Autowired` 없이도 자동 생성자 주입을 적용한다.
+- `LionRepository` 구현체가 두 개이지만 `MemoryLionRepository` 에 `@Primary` 가 붙어 있어 충돌 없이 기본 주입된다.
+- `IntroducePolicy` 는 클래스에 `@Component` 가 없고, `AppConfig.introducePolicy()` 의 `@Bean` 메서드로만 등록된다 → **수동 등록 증거**.
+
+### 체크리스트 ↔ 코드 매핑
+
+| 체크리스트 | 구현 위치 |
+|---|---|
+| Spring Boot 프로젝트(Spring Initializr)가 생성되었는가 | [mission06/pom.xml](mission06/pom.xml) — `spring-boot-starter-parent 3.3.5`, `spring-boot-starter-web` |
+| 5주차 코드가 Spring Boot 구조로 이전되었는가 | `src/mission05/*` → [mission06/src/main/java/com/likelion/mission06/](mission06/src/main/java/com/likelion/mission06/) 의 `domain / repository / service / policy / exception` 패키지 |
+| `@Service`, `@Repository` 어노테이션이 사용되었는가 | [LionService.java](mission06/src/main/java/com/likelion/mission06/service/LionService.java) (`@Service`), [MemoryLionRepository.java](mission06/src/main/java/com/likelion/mission06/repository/MemoryLionRepository.java) / [MockLionRepository.java](mission06/src/main/java/com/likelion/mission06/repository/MockLionRepository.java) (`@Repository`) |
+| 생성자 주입이 적용되어 있는가 | `LionService(LionRepository, IntroducePolicy)`, `HelloController(LionService)` — 모두 단일 생성자 + `final` 필드, setter 없음 |
+| `GET /hello` API 가 정상 동작하는가 | [HelloController.java](mission06/src/main/java/com/likelion/mission06/controller/HelloController.java) — `@GetMapping("/hello")` |
+| `@Configuration + @Bean` 수동 등록 또는 자동 등록 방식을 사용했는가 | **둘 다 사용**: [AppConfig.java](mission06/src/main/java/com/likelion/mission06/config/AppConfig.java) (`@Configuration + @Bean` 수동) + `@Service / @Repository / @RestController` (컴포넌트 스캔 자동) |
+| GitHub README.md 에 본인 이름이 포함되었는가 | 본 문서 최상단 "작성자: 노경민" |
+
+### 실행 방법
+
+프로젝트에 **Maven Wrapper** 가 포함되어 있어 별도의 Maven 설치 없이 바로 빌드/실행할 수 있다 (JDK 17 만 필요).
+
+```bash
+# 1) mission06 디렉터리로 이동
+cd mission06
+
+# 2) Spring Boot 실행 (Maven Wrapper)
+#    Windows PowerShell / cmd:
+.\mvnw.cmd spring-boot:run
+#    macOS / Linux:
+./mvnw spring-boot:run
+
+# 3) 다른 터미널에서 엔드포인트 확인
+curl http://localhost:8080/hello
+# → Hello, Spring Boot! (Mission06 - LKELION 작성자: 노경민)
+
+curl http://localhost:8080/hello/lions
+# → CommandLineRunner 가 미리 등록한 사자 4명의 toString 목록
+```
+
+> 8080 포트가 점유돼 있으면 `SERVER_PORT=8089 ./mvnw spring-boot:run` (Unix) 또는
+> `$env:SERVER_PORT=8089; .\mvnw.cmd spring-boot:run` (PowerShell) 처럼 다른 포트로 띄울 수 있다.
+
+### 동작 검증 (이 저장소에서 직접 확인됨)
+
+JDK 17 + Maven Wrapper 환경에서 다음을 확인했다:
+
+| 단계 | 명령 | 결과 |
+|---|---|---|
+| 컴파일 | `./mvnw clean compile` | `BUILD SUCCESS` (15개 소스 파일) |
+| 부팅 | `./mvnw spring-boot:run` | `Started Mission06Application in 1.5s`, Tomcat 8089 |
+| 빈 주입 | CommandLineRunner 로그 | `LionService` 자동 주입 → 사자 4명 등록 후 `printRoster` 정상 출력 |
+| `GET /hello` | `curl` | HTTP 200 + `Hello, Spring Boot! (Mission06 - LKELION 작성자: 노경민)` |
+| `GET /hello/lions` | `curl` | HTTP 200 + 등록된 4명의 JSON 배열 |
+
+### 동작 시연
+
+- 기동 직후 `CommandLineRunner` (= `Mission06Application#demoRunner`) 가 한 번 실행되어, Spring 이 주입한 `LionService` 로 사자 4명을 등록·출력한다.
+- 그 후 `GET /hello` 는 단순 인사 문자열을, `GET /hello/lions` 는 위에서 등록된 사자 명단을 JSON 배열로 반환한다 — Spring DI 와 웹 계층이 둘 다 살아있다는 증거.
+
+### Mission05 와의 비교 (한 줄 요약)
+
+| 관심사 | Mission05 (순수 Java) | Mission06 (Spring Boot) |
+|---|---|---|
+| 빈 조립자 | `AppConfig` 정적 팩토리 | Spring `ApplicationContext` |
+| 의존성 표시 | `AppConfig` 안에서 `new LionService(...)` | `@Service` + 단일 생성자 → 자동 생성자 주입 |
+| 구현체 선택 | `createLionService()` vs `createDemoLionService()` 두 팩토리 | `@Primary` (기본) + `@Qualifier("mockLionRepository")` (대안) |
+| 정책 교체 | `AppConfig` 메서드 한 줄 수정 | `AppConfig#introducePolicy()` `@Bean` 메서드 한 줄 수정 |
+| 진입점 | `public static void main` — `AppConfig.createLionService()` 호출 | `SpringApplication.run(...)` — 컨테이너가 그래프를 통째로 조립 |
+
+### 설계 포인트
+
+1. **자동 + 수동 등록의 의도적 공존** — `@Service / @Repository / @RestController` 로 컴포넌트 스캔의 편의를 보여주고, `@Configuration + @Bean` 으로 "갈아끼울 가능성이 높은 협력자(=정책)" 를 명시적으로 노출하는 두 가지 등록 패턴을 한 프로젝트에서 함께 시연한다.
+2. **생성자 주입 + `final` 필드 고수** — Mission05 의 불변 의존성 원칙을 그대로 유지한다. 필드 주입이 아니라 생성자 시그니처 한 줄로 "이 클래스가 무엇을 필요로 하는가" 가 드러난다. 단일 생성자라 `@Autowired` 도 생략된다.
+3. **여러 구현체 + `@Primary`** — 같은 타입의 빈이 둘 이상이면 Spring 은 충돌을 알리며 기동을 중단시킨다. `MemoryLionRepository` 에 `@Primary` 를 박아 기본 선택을 명시하고, `MockLionRepository` 는 이름(`"mockLionRepository"`) 으로만 접근 가능하게 했다 → Mission05 의 두 팩토리(`createLionService` / `createDemoLionService`) 와 동일한 의도를 Spring 어휘로 옮긴 것.
+4. **컨트롤러도 DI 의 일부** — `HelloController` 는 `LionService` 를 생성자로 주입받는다. 웹 계층까지 같은 IoC 컨테이너 안에 들어와 있다는 점을 보여주는 가장 단순한 증거이다.
+5. **`CommandLineRunner` 로 부트 시 자동 시연** — Mission05 의 `main` 시연 흐름이 Spring 환경에서도 동일하게 동작함을 부팅 직후 한 번 출력해 확인한다. 별도 클라이언트 호출 없이도 콘솔에서 즉시 검증 가능.
