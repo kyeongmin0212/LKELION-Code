@@ -15,6 +15,7 @@
 | Mission 04 | Java Collections & 설계 확장 | [src/mission04/](src/mission04/) |
 | Mission 05 | 자바로 배우는 IoC / DI | [src/mission05/](src/mission05/) |
 | Mission 06 | Spring Boot 전환 (IoC/DI → Spring 컨테이너) | [src/mission06/](src/mission06/) |
+| Mission 07 | REST API 설계 — Member CRUD / DTO·Entity 분리 / ResponseEntity | [src/mission07/](src/mission07/) |
 
 ---
 
@@ -503,3 +504,115 @@ JDK 17 + Maven Wrapper 환경에서 다음을 확인했다:
 3. **여러 구현체 + `@Primary`** — 같은 타입의 빈이 둘 이상이면 Spring 은 충돌을 알리며 기동을 중단시킨다. `MemoryLionRepository` 에 `@Primary` 를 박아 기본 선택을 명시하고, `MockLionRepository` 는 이름(`"mockLionRepository"`) 으로만 접근 가능하게 했다 → Mission05 의 두 팩토리(`createLionService` / `createDemoLionService`) 와 동일한 의도를 Spring 어휘로 옮긴 것.
 4. **컨트롤러도 DI 의 일부** — `HelloController` 는 `LionService` 를 생성자로 주입받는다. 웹 계층까지 같은 IoC 컨테이너 안에 들어와 있다는 점을 보여주는 가장 단순한 증거이다.
 5. **`CommandLineRunner` 로 부트 시 자동 시연** — Mission05 의 `main` 시연 흐름이 Spring 환경에서도 동일하게 동작함을 부팅 직후 한 번 출력해 확인한다. 별도 클라이언트 호출 없이도 콘솔에서 즉시 검증 가능.
+
+---
+
+## Mission 07 — REST API 설계 (Member CRUD)
+
+### 목표
+- RESTful 규칙에 따라 CRUD API(POST / GET / PUT / DELETE)를 설계한다.
+- 요청/응답용 **DTO 를 Entity 와 분리**하여 구현한다.
+- **`ResponseEntity`** 로 적절한 HTTP 상태 코드를 반환한다.
+
+### API 명세
+
+| 메서드 | URL | 설명 | 성공 코드 | 실패 코드 |
+|---|---|---|---|---|
+| `POST`   | `/members`      | 멤버 생성   | `201 Created` (+ `Location` 헤더) | `400` (검증 실패) |
+| `GET`    | `/members`      | 전체 조회   | `200 OK` (빈 목록도 200) | — |
+| `GET`    | `/members/{id}` | 단건 조회   | `200 OK` | `404` (없는 id) |
+| `PUT`    | `/members/{id}` | 멤버 수정   | `200 OK` | `400` / `404` |
+| `DELETE` | `/members/{id}` | 멤버 삭제   | `204 No Content` | `404` (없는 id) |
+
+> RESTful URL 설계 규칙: 자원은 복수형 명사 컬렉션(`/members`)으로, 개별 자원은 `/members/{id}`로 표현한다.
+> "무엇을 할지"는 URL 의 동사가 아니라 **HTTP 메서드**로 표현한다.
+
+### 패키지 구조
+
+```
+src/mission07/src/main/java/com/likelion/mission07/
+├── Mission07Application.java          진입점 (+ CommandLineRunner 시드 멤버 3명)
+├── domain/
+│   └── Member.java                    Entity — 서버가 채번하는 id 보유
+├── dto/
+│   ├── MemberCreateRequest.java       생성 요청 DTO (@Valid 검증, id 없음)
+│   ├── MemberUpdateRequest.java       수정 요청 DTO (id 는 URL 경로변수)
+│   ├── MemberResponse.java            응답 DTO (Entity → 표현 변환, 불변)
+│   └── ErrorResponse.java             에러 응답 DTO (status/message/errors)
+├── repository/
+│   ├── MemberRepository.java          저장소 계약 (인터페이스)
+│   └── MemoryMemberRepository.java    인메모리 구현 (ConcurrentHashMap + AtomicLong 채번)
+├── service/
+│   └── MemberService.java             CRUD 비즈니스 로직 (존재 검증 → 404)
+├── controller/
+│   └── MemberController.java          @RestController — ResponseEntity 로 상태 코드 통제
+└── exception/
+    ├── MemberNotFoundException.java    → 404 매핑용 예외
+    └── GlobalExceptionHandler.java     @RestControllerAdvice — 예외 → HTTP 상태 코드 매핑
+```
+
+### DTO ↔ Entity 분리 (이 미션의 핵심)
+
+| 구분 | id | 검증 | 역할 |
+|---|---|---|---|
+| `Member` (Entity) | 보유 (저장 시 채번) | 도메인 불변식 | 저장되는 도메인 단위 |
+| `MemberCreateRequest` | **없음** (서버가 채번) | `@NotBlank` / `@Email` / `@Min` | 생성 입력 |
+| `MemberUpdateRequest` | 없음 (URL `{id}` 사용) | `@NotBlank` / `@Email` / `@Min` | 수정 입력 |
+| `MemberResponse` | 보유 (응답에 노출) | — | 응답 표현 (Entity 직접 노출 금지) |
+
+- **요청 DTO 에 id 가 없는 이유**: 식별자는 서버가 부여하는 책임이므로 클라이언트 입력에서 배제한다.
+- **응답에 Entity 를 직접 쓰지 않는 이유**: JSON 응답 계약을 고정해, 도메인 내부가 바뀌어도 API 표현이 흔들리지 않게 한다.
+
+### 실행 방법
+
+```bash
+# 1) mission07 디렉터리로 이동
+cd src/mission07
+
+# 2) Spring Boot 실행 (Maven Wrapper — JDK 17 만 필요)
+#    Windows PowerShell:  .\mvnw.cmd spring-boot:run
+#    macOS / Linux:       ./mvnw spring-boot:run
+
+# 3) 다른 터미널에서 CRUD 호출
+# (생성) 201 Created + Location 헤더
+curl -i -X POST http://localhost:8080/members \
+  -H "Content-Type: application/json" \
+  -d '{"name":"노경민","email":"km@likelion.org","generation":13}'
+
+# (전체 조회) 200 OK
+curl http://localhost:8080/members
+
+# (수정) 200 OK
+curl -X PUT http://localhost:8080/members/1 \
+  -H "Content-Type: application/json" \
+  -d '{"name":"노경민-수정","email":"km2@likelion.org","generation":14}'
+
+# (삭제) 204 No Content
+curl -i -X DELETE http://localhost:8080/members/1
+```
+
+> 한글 본문을 보낼 때는 터미널 인코딩(특히 Windows EUC-KR)으로 인해 깨질 수 있으므로,
+> UTF-8 로 저장한 JSON 파일을 `--data-binary @파일.json` 으로 보내는 방식을 권장한다.
+
+### 동작 검증 (이 저장소에서 직접 확인됨)
+
+JDK 17 + Maven Wrapper 환경에서 다음을 확인했다:
+
+| 단계 | 요청 | 결과 |
+|---|---|---|
+| 컴파일 | `./mvnw clean compile` | `BUILD SUCCESS` |
+| 부팅 | `./mvnw spring-boot:run` | `Started Mission07Application`, Tomcat 8080, 시드 멤버 3명 |
+| 생성 | `POST /members` | `201 Created` + `Location: /members/4` + 생성된 멤버 JSON |
+| 전체 조회 | `GET /members` | `200 OK` + 멤버 배열 |
+| 수정 | `PUT /members/4` | `200 OK` + 갱신된 멤버 JSON |
+| 삭제 | `DELETE /members/4` | `204 No Content` |
+| 없는 id | `GET·PUT·DELETE /members/999` | `404 Not Found` + 에러 JSON |
+| 검증 실패 | `POST /members` (빈 이름 / 잘못된 이메일 / 기수 0) | `400 Bad Request` + 필드별 메시지 |
+
+### 설계 포인트
+
+1. **DTO ↔ Entity 분리** — 생성/수정 요청 DTO 는 `id` 를 받지 않고(서버 채번), 응답은 `MemberResponse` 로 감싸 Entity 를 외부에 직접 노출하지 않는다. 입력 검증·표현 책임을 도메인에서 떼어낸다.
+2. **`ResponseEntity` 로 상태 코드 명시 통제** — POST 는 `201 Created` + `Location`, DELETE 는 `204 No Content`, 조회/수정은 `200 OK` 로 각 메서드의 의미에 맞는 코드를 반환한다.
+3. **RESTful URL 설계** — 컬렉션(`/members`)과 개별 자원(`/members/{id}`)을 계층으로 나누고, 동작은 URL 동사가 아니라 HTTP 메서드로 표현한다.
+4. **예외 → 상태 코드 매핑의 중앙화** — `@RestControllerAdvice` 한 곳에서 `MemberNotFoundException → 404`, `@Valid` 검증 실패 → `400` 을 일관되게 매핑한다. 컨트롤러는 정상 흐름에만 집중한다.
+5. **계층 분리** — 컨트롤러(HTTP) ↔ 서비스(도메인 규칙) ↔ 저장소(영속)로 책임을 나누고, 서비스는 DTO 를 모른 채 순수 도메인 계층으로 유지한다.
