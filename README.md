@@ -16,6 +16,7 @@
 | Mission 05 | 자바로 배우는 IoC / DI | [src/mission05/](src/mission05/) |
 | Mission 06 | Spring Boot 전환 (IoC/DI → Spring 컨테이너) | [src/mission06/](src/mission06/) |
 | Mission 07 | REST API 설계 — Member CRUD / DTO·Entity 분리 / ResponseEntity | [src/mission07/](src/mission07/) |
+| Mission 08 | JPA 기초 & 영속성 컨텍스트 — Member CRUD 를 DB 에 연동 | [src/mission08/](src/mission08/) |
 
 ---
 
@@ -616,3 +617,158 @@ JDK 17 + Maven Wrapper 환경에서 다음을 확인했다:
 3. **RESTful URL 설계** — 컬렉션(`/members`)과 개별 자원(`/members/{id}`)을 계층으로 나누고, 동작은 URL 동사가 아니라 HTTP 메서드로 표현한다.
 4. **예외 → 상태 코드 매핑의 중앙화** — `@RestControllerAdvice` 한 곳에서 `MemberNotFoundException → 404`, `@Valid` 검증 실패 → `400` 을 일관되게 매핑한다. 컨트롤러는 정상 흐름에만 집중한다.
 5. **계층 분리** — 컨트롤러(HTTP) ↔ 서비스(도메인 규칙) ↔ 저장소(영속)로 책임을 나누고, 서비스는 DTO 를 모른 채 순수 도메인 계층으로 유지한다.
+
+---
+
+## Mission 08 — JPA 기초 & 영속성 컨텍스트
+
+### 목표
+- JPA `@Entity` 로 엔티티를 정의하고 DB 와 매핑한다.
+- `JpaRepository` 를 활용하여 CRUD 를 **실제 DB** 에 연동한다.
+- `application.properties` 에 DB 연결 및 Hibernate 로그 설정을 구성한다.
+
+> **Mission07 과의 차이(이 미션의 핵심)**: REST API·DTO·`ResponseEntity` 설계는 그대로 가져오되,
+> 영속 계층을 **인메모리 Map → JPA(Hibernate) + DB** 로 교체한다. 직접 짜던 `MemoryMemberRepository`
+> 와 `AtomicLong` 수동 채번이 사라지고, `JpaRepository` 상속과 DB auto-increment 가 그 자리를 대신한다.
+
+### 프로젝트 위치 / 빌드 정보
+
+| 항목 | 값 |
+|---|---|
+| 위치 | [src/mission08/](src/mission08/) |
+| 빌드 도구 | Maven (`src/mission08/pom.xml`) |
+| Spring Boot | 3.3.5 |
+| Java | 17 |
+| DB | H2 (임베디드 — 별도 설치 불필요) |
+| 베이스 패키지 | `com.likelion.mission08` |
+
+### 패키지 구조
+
+```
+src/mission08/
+├── pom.xml                              ▶ web + data-jpa + validation + H2
+└── src/main/
+    ├── resources/
+    │   └── application.properties        ▶ DB 연결 + ddl-auto + Hibernate SQL 로그
+    └── java/com/likelion/mission08/
+        ├── Mission08Application.java     ▶ @SpringBootApplication + CommandLineRunner(시드 3명)
+        ├── domain/
+        │   ├── Member.java               ▶ @Entity / @Id @GeneratedValue / @Enumerated(STRING)
+        │   └── Part.java                 ▶ (enum) BACKEND / FRONTEND / DESIGN
+        ├── dto/
+        │   ├── MemberCreateRequest.java  ▶ 생성 요청 DTO (@Valid, id 없음)
+        │   ├── MemberUpdateRequest.java  ▶ 수정 요청 DTO (id 는 URL 경로변수)
+        │   ├── MemberResponse.java       ▶ 응답 DTO (Entity 직접 노출 금지)
+        │   └── ErrorResponse.java        ▶ 에러 응답 DTO
+        ├── repository/
+        │   └── MemberRepository.java     ▶ extends JpaRepository<Member, Long> + findByPart
+        ├── service/
+        │   └── MemberService.java        ▶ @Transactional — 영속성 컨텍스트 변경 감지로 수정
+        ├── controller/
+        │   └── MemberController.java     ▶ @RestController — ResponseEntity 로 상태 코드 통제
+        └── exception/
+            ├── MemberNotFoundException.java
+            └── GlobalExceptionHandler.java
+```
+
+### 체크리스트 ↔ 코드 매핑
+
+| 체크리스트 | 구현 위치 |
+|---|---|
+| `@Entity` 어노테이션으로 JPA 엔티티가 정의되었는가 | [Member.java](src/mission08/src/main/java/com/likelion/mission08/domain/Member.java) — `@Entity @Table(name="members")` |
+| `@Id` 와 `@GeneratedValue` 전략이 설정되었는가 | [Member.java](src/mission08/src/main/java/com/likelion/mission08/domain/Member.java) — `@Id @GeneratedValue(strategy = GenerationType.IDENTITY)` |
+| `JpaRepository` 를 상속한 Repository 인터페이스가 있는가 | [MemberRepository.java](src/mission08/src/main/java/com/likelion/mission08/repository/MemberRepository.java) — `extends JpaRepository<Member, Long>` |
+| `application.properties` 에 DB 연결 설정이 있는가 | [application.properties](src/mission08/src/main/resources/application.properties) — `spring.datasource.url / driver / username` |
+| CRUD 기능이 실제 DB 에 반영되는가 | [MemberService.java](src/mission08/src/main/java/com/likelion/mission08/service/MemberService.java) + `JpaRepository` 의 `save/findById/findAll/deleteById` → Hibernate INSERT/SELECT/UPDATE/DELETE SQL 로 확인 |
+| `@Enumerated(EnumType.STRING)` 으로 Enum 타입을 사용했는가 | [Member.java](src/mission08/src/main/java/com/likelion/mission08/domain/Member.java) — `@Enumerated(EnumType.STRING) Part part` |
+| Hibernate SQL 로그가 출력되도록 설정했는가 | [application.properties](src/mission08/src/main/resources/application.properties) — `spring.jpa.show-sql=true`, `format_sql=true`, `logging.level.org.hibernate.SQL=DEBUG` |
+| GitHub README.md 에 본인 이름이 포함되었는가 | 본 문서 최상단 "작성자: 노경민" |
+
+### 엔티티 매핑 (이 미션의 핵심)
+
+```java
+@Entity
+@Table(name = "members")
+public class Member {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY) // DB auto-increment 채번
+    private Long id;
+
+    @Enumerated(EnumType.STRING)  // DB 에 "BACKEND" 문자열로 저장 (ORDINAL 아님)
+    @Column(nullable = false, length = 20)
+    private Part part;
+    ...
+}
+```
+
+- **`@GeneratedValue(IDENTITY)`** — Mission07 의 `AtomicLong` 수동 채번을 DB auto-increment 에 위임한다.
+- **`@Enumerated(EnumType.STRING)`** — enum 을 순서값(0/1/2)이 아닌 문자열로 저장한다. 상수 선언 순서가 바뀌어도 기존 데이터가 깨지지 않는다.
+- **영속성 컨텍스트(dirty checking)** — `MemberService.update()` 는 `findById` 로 가져온 영속 Entity 의 필드만 바꾼다. 트랜잭션 커밋 시점에 변경 감지가 UPDATE SQL 을 자동 생성하므로 별도 `save` 호출이 없다.
+
+### 실행 방법
+
+```bash
+# 1) mission08 디렉터리로 이동
+cd src/mission08
+
+# 2) Spring Boot 실행 (Maven Wrapper — JDK 17 만 필요)
+#    Windows PowerShell:  .\mvnw.cmd spring-boot:run
+#    macOS / Linux:       ./mvnw spring-boot:run
+
+# 3) 다른 터미널에서 CRUD 호출
+# (생성) 201 Created + Location 헤더 — 콘솔에 INSERT SQL 출력
+curl -i -X POST http://localhost:8080/members \
+  -H "Content-Type: application/json" \
+  -d '{"name":"노경민","email":"km@likelion.org","generation":13,"part":"BACKEND"}'
+
+# (전체 조회) 200 OK — SELECT SQL 출력. ?part=BACKEND 로 파트별 조회도 가능
+curl http://localhost:8080/members
+
+# (수정) 200 OK — 영속성 컨텍스트 dirty checking 으로 UPDATE SQL 자동 출력
+curl -X PUT http://localhost:8080/members/1 \
+  -H "Content-Type: application/json" \
+  -d '{"name":"노경민-수정","email":"km2@likelion.org","generation":14,"part":"FRONTEND"}'
+
+# (삭제) 204 No Content — DELETE SQL 출력
+curl -i -X DELETE http://localhost:8080/members/1
+```
+
+> DB 내용을 브라우저로 직접 확인하려면 `http://localhost:8080/h2-console` 에 접속해
+> JDBC URL `jdbc:h2:mem:mission08db`, 사용자명 `sa` 로 로그인한다.
+
+### 동작 검증 (이 저장소에서 직접 확인됨)
+
+JDK 17 + Maven Wrapper 환경에서 다음을 확인했다:
+
+| 단계 | 명령 / 요청 | 결과 |
+|---|---|---|
+| 컴파일·패키지 | `./mvnw clean package` | `BUILD SUCCESS` |
+| 부팅 | `./mvnw spring-boot:run` | `Started Mission08Application`, Tomcat 8080, 시드 멤버 3명 DB 저장 |
+| 테이블 생성 | 기동 로그 | Hibernate `create table members (...)` DDL 출력 |
+| 시드 INSERT | CommandLineRunner | `insert into members ...` SQL 3건 출력 |
+| 생성 | `POST /members` | `201 Created` + `Location` + INSERT SQL |
+| 전체 조회 | `GET /members` | `200 OK` + `select ... from members` SQL |
+| 수정 | `PUT /members/{id}` | `200 OK` + 변경 감지 UPDATE SQL |
+| 삭제 | `DELETE /members/{id}` | `204 No Content` + DELETE SQL |
+| 없는 id | `GET·PUT·DELETE /members/999` | `404 Not Found` + 에러 JSON |
+| 검증 실패 | `POST /members` (빈 이름 / 잘못된 이메일 / 기수 0 / 파트 누락) | `400 Bad Request` + 필드별 메시지 |
+
+### Mission07 과의 비교 (한 줄 요약)
+
+| 관심사 | Mission07 (인메모리) | Mission08 (JPA + DB) |
+|---|---|---|
+| 저장소 구현 | `MemoryMemberRepository` 직접 구현 | `JpaRepository` 상속 → 구현체 자동 생성 |
+| 식별자 채번 | `AtomicLong` 수동 | `@GeneratedValue(IDENTITY)` (DB auto-increment) |
+| 저장 위치 | `ConcurrentHashMap` (메모리) | H2 DB (JDBC + Hibernate) |
+| 수정 방식 | 객체 필드 직접 변경 | 영속성 컨텍스트 dirty checking → UPDATE SQL 자동 |
+| enum 저장 | 필드 그대로 (메모리) | `@Enumerated(STRING)` 컬럼 매핑 |
+| SQL 가시성 | 없음 | Hibernate `show-sql` 로 실제 SQL 콘솔 출력 |
+
+### 설계 포인트
+
+1. **`@Entity` 로 도메인을 영속 대상으로 승격** — Mission07 의 POJO `Member` 에 `@Entity / @Id / @GeneratedValue / @Enumerated` 를 부여해 DB 테이블 `members` 와 매핑한다. JPA 규약상 인자 없는 기본 생성자가 필요하므로 `protected` 로 열어 외부 오용을 막는다.
+2. **`JpaRepository` 상속으로 보일러플레이트 제거** — 인터페이스 선언만으로 CRUD 메서드 전부를 얻는다. `findByPart` 처럼 메서드 이름만으로 `WHERE` 절 쿼리가 파생된다(쿼리 메서드).
+3. **`@Enumerated(EnumType.STRING)`** — enum 을 순서값이 아닌 문자열로 저장해, 상수 추가/재배치에도 데이터 정합성이 유지된다.
+4. **영속성 컨텍스트의 변경 감지** — 수정은 `save` 를 다시 부르지 않고, `@Transactional` 안에서 영속 Entity 의 필드를 바꾸는 것만으로 커밋 시 UPDATE SQL 이 자동 실행된다.
+5. **Hibernate SQL 로그로 "DB 반영" 을 가시화** — `show-sql` + `format_sql` + `org.hibernate.SQL=DEBUG` 로, 모든 CRUD 가 실제 SQL 로 DB 에 나가는 것을 콘솔에서 직접 확인한다.
