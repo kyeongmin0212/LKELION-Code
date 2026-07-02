@@ -1,0 +1,27 @@
+package com.likelion.mission09.dto;
+
+import java.util.List;
+
+/**
+ * 에러 응답 DTO — 실패 응답의 바디를 일관된 형태로 고정한다.
+ */
+public class ErrorResponse {
+
+    private final int          status;
+    private final String       message;
+    private final List<String> errors;
+
+    public ErrorResponse(int status, String message, List<String> errors) {
+        this.status  = status;
+        this.message = message;
+        this.errors  = errors == null ? List.of() : errors;
+    }
+
+    public ErrorResponse(int status, String message) {
+        this(status, message, List.of());
+    }
+
+    public int          getStatus()  { return status; }
+    public String       getMessage() { return message; }
+    public List<String> getErrors()  { return errors; }
+}

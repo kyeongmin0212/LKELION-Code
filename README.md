@@ -17,6 +17,7 @@
 | Mission 06 | Spring Boot 전환 (IoC/DI → Spring 컨테이너) | [src/mission06/](src/mission06/) |
 | Mission 07 | REST API 설계 — Member CRUD / DTO·Entity 분리 / ResponseEntity | [src/mission07/](src/mission07/) |
 | Mission 08 | JPA 기초 & 영속성 컨텍스트 — Member CRUD 를 DB 에 연동 | [src/mission08/](src/mission08/) |
+| Mission 09 | 연관관계 & 트랜잭션 — Team·Member·Assignment 1:N 매핑 / @Transactional | [src/mission09/](src/mission09/) |
 
 ---
 
@@ -772,3 +773,169 @@ JDK 17 + Maven Wrapper 환경에서 다음을 확인했다:
 3. **`@Enumerated(EnumType.STRING)`** — enum 을 순서값이 아닌 문자열로 저장해, 상수 추가/재배치에도 데이터 정합성이 유지된다.
 4. **영속성 컨텍스트의 변경 감지** — 수정은 `save` 를 다시 부르지 않고, `@Transactional` 안에서 영속 Entity 의 필드를 바꾸는 것만으로 커밋 시 UPDATE SQL 이 자동 실행된다.
 5. **Hibernate SQL 로그로 "DB 반영" 을 가시화** — `show-sql` + `format_sql` + `org.hibernate.SQL=DEBUG` 로, 모든 CRUD 가 실제 SQL 로 DB 에 나가는 것을 콘솔에서 직접 확인한다.
+
+---
+
+## Mission 09 — 연관관계 & 트랜잭션
+
+### 목표
+- `@ManyToOne` / `@OneToMany` 로 **Team ↔ Member 1:N** 연관관계를 매핑한다.
+- `@JoinColumn` 으로 외래키를 설정하고, **연관관계의 주인(N 쪽)** 을 올바르게 지정한다.
+- `@Transactional` 을 Service 계층에 적용하여 트랜잭션을 관리한다.
+- **과제(Assignment) ↔ Member 1:N** 관계를 구현하고, 연관관계 기반 조회 API 를 제공한다.
+
+> **Mission08 과의 차이(이 미션의 핵심)**: 단일 `Member` 엔티티에 머물던 Mission08 위에
+> `Team`·`Assignment` 를 추가해 **엔티티 간 연관관계(1:N)** 와 **양방향 매핑/연관관계의 주인** 개념을 도입한다.
+> Service 계층은 `@Transactional` 로 묶여, 팀 배정·과제 연결이 저장과 하나의 트랜잭션으로 원자적으로 반영된다.
+
+### 프로젝트 위치 / 빌드 정보
+
+| 항목 | 값 |
+|---|---|
+| 위치 | [src/mission09/](src/mission09/) |
+| 빌드 도구 | Maven (`src/mission09/pom.xml`) |
+| Spring Boot | 3.3.5 |
+| Java | 17 |
+| DB | H2 (임베디드 — 별도 설치 불필요) |
+| 베이스 패키지 | `com.likelion.mission09` |
+
+### 엔티티 관계도 (텍스트)
+
+```
+     Team (1) ────< (N) Member (1) ────< (N) Assignment
+      │  @OneToMany       │  @OneToMany            │
+      │  (mappedBy=team)  │  (mappedBy=member)     │
+      │                   │ @ManyToOne             │ @ManyToOne
+      │                   │ @JoinColumn(team_id)   │ @JoinColumn(member_id)
+      └── 비주인          └── 주인 / 비주인         └── 주인
+```
+
+- **연관관계의 주인은 FK 를 소유하는 N 쪽**: `Member.team`(FK `team_id`), `Assignment.member`(FK `member_id`).
+- **비주인(`mappedBy`)** 은 조회 전용 뷰: `Team.members`, `Member.assignments`.
+
+### 패키지 구조
+
+```
+src/mission09/
+├── pom.xml                              ▶ web + data-jpa + validation + H2
+└── src/main/
+    ├── resources/
+    │   └── application.properties        ▶ DB 연결 + ddl-auto + Hibernate SQL 로그
+    └── java/com/likelion/mission09/
+        ├── Mission09Application.java     ▶ @SpringBootApplication + CommandLineRunner(팀·멤버·과제 연관 시드)
+        ├── domain/
+        │   ├── Team.java                 ▶ @OneToMany(mappedBy="team") — 비주인, addMember 편의 메서드
+        │   ├── Member.java               ▶ @ManyToOne @JoinColumn(team_id) 주인 + @OneToMany(mappedBy="member")
+        │   ├── Assignment.java           ▶ @ManyToOne @JoinColumn(member_id) 주인
+        │   └── Part.java                 ▶ (enum) BACKEND / FRONTEND / DESIGN
+        ├── dto/
+        │   ├── TeamCreateRequest.java / TeamResponse.java
+        │   ├── MemberCreateRequest.java (teamId 선택) / MemberUpdateRequest.java / MemberResponse.java (teamId·teamName)
+        │   ├── AssignmentCreateRequest.java (memberId 필수) / AssignmentResponse.java
+        │   └── ErrorResponse.java
+        ├── repository/
+        │   ├── TeamRepository.java       ▶ extends JpaRepository<Team, Long>
+        │   ├── MemberRepository.java     ▶ + findByTeamId (팀별 멤버 조회), findByPart
+        │   └── AssignmentRepository.java ▶ + findByMemberId (멤버별 과제 조회)
+        ├── service/
+        │   ├── TeamService.java          ▶ @Transactional — 팀 CRUD + 팀별 멤버 조회
+        │   ├── MemberService.java        ▶ @Transactional — 생성 시 팀 배정(연관관계 설정)
+        │   └── AssignmentService.java    ▶ @Transactional — 과제 생성 시 멤버 연결
+        ├── controller/
+        │   ├── TeamController.java       ▶ /teams + GET /teams/{id}/members (팀별 멤버 조회 API)
+        │   ├── MemberController.java     ▶ /members + GET /members/{id}/assignments
+        │   └── AssignmentController.java ▶ /assignments
+        └── exception/
+            ├── TeamNotFoundException / MemberNotFoundException / AssignmentNotFoundException
+            └── GlobalExceptionHandler.java
+```
+
+### 체크리스트 ↔ 코드 매핑
+
+| 체크리스트 | 구현 위치 |
+|---|---|
+| `@ManyToOne`/`@OneToMany` 로 연관관계가 매핑되었는가 | [Member.java](src/mission09/src/main/java/com/likelion/mission09/domain/Member.java) `@ManyToOne Team team` + [Team.java](src/mission09/src/main/java/com/likelion/mission09/domain/Team.java) `@OneToMany(mappedBy="team")` |
+| `@JoinColumn` 으로 외래키가 올바르게 설정되었는가 | [Member.java](src/mission09/src/main/java/com/likelion/mission09/domain/Member.java) `@JoinColumn(name="team_id")`, [Assignment.java](src/mission09/src/main/java/com/likelion/mission09/domain/Assignment.java) `@JoinColumn(name="member_id")` |
+| 연관관계의 주인(N쪽)이 올바르게 설정되었는가 | 주인 = FK 소유자인 `Member`(team_id) / `Assignment`(member_id). 비주인은 `mappedBy` 로 위임 |
+| `@Transactional` 이 Service 계층에 적용되었는가 | [TeamService](src/mission09/src/main/java/com/likelion/mission09/service/TeamService.java) · [MemberService](src/mission09/src/main/java/com/likelion/mission09/service/MemberService.java) · [AssignmentService](src/mission09/src/main/java/com/likelion/mission09/service/AssignmentService.java) — 클래스 `readOnly=true` + 쓰기 메서드 `@Transactional` |
+| 팀별 멤버 조회 API 가 있는가 | [TeamController](src/mission09/src/main/java/com/likelion/mission09/controller/TeamController.java) `GET /teams/{id}/members` → `MemberRepository.findByTeamId` |
+| 과제(Assignment) 엔티티와 멤버 간 1:N 관계가 구현되었는가 | [Assignment.java](src/mission09/src/main/java/com/likelion/mission09/domain/Assignment.java) `@ManyToOne Member` + [Member.java](src/mission09/src/main/java/com/likelion/mission09/domain/Member.java) `@OneToMany(mappedBy="member")` |
+| GitHub README.md 에 본인 이름이 포함되었는가 | 본 문서 최상단 "작성자: 노경민" |
+
+### 연관관계 매핑 (이 미션의 핵심)
+
+```java
+// [주인, N쪽] Member — FK 컬럼 team_id 를 소유한다
+@ManyToOne(fetch = FetchType.LAZY)
+@JoinColumn(name = "team_id")
+private Team team;
+
+// [비주인, 1쪽] Team — mappedBy 로 Member.team 에 매핑을 위임 (읽기 뷰)
+@OneToMany(mappedBy = "team", cascade = CascadeType.ALL, orphanRemoval = true)
+private List<Member> members = new ArrayList<>();
+
+// [주인, N쪽] Assignment — FK 컬럼 member_id 를 소유한다
+@ManyToOne(fetch = FetchType.LAZY)
+@JoinColumn(name = "member_id", nullable = false)
+private Member member;
+```
+
+- **주인/비주인** — FK 를 소유한 N 쪽(`Member`, `Assignment`)이 주인이며, INSERT/UPDATE 시 FK 값을 반영한다. `mappedBy` 를 가진 1 쪽은 조회 전용이다.
+- **양방향 동기화** — `Team.addMember` / `Member.addAssignment` 편의 메서드가 양쪽 참조를 한 번에 세팅해 객체 그래프와 DB FK 가 어긋나지 않게 한다.
+- **지연 로딩(LAZY)** — `@ManyToOne` 을 LAZY 로 두어 불필요한 조인/조회를 피한다.
+
+### 실행 방법
+
+```bash
+# 1) mission09 디렉터리로 이동
+cd src/mission09
+
+# 2) Spring Boot 실행 (Maven Wrapper — JDK 17 만 필요)
+#    Windows PowerShell:  .\mvnw.cmd spring-boot:run
+#    macOS / Linux:       ./mvnw spring-boot:run
+
+# 3) 다른 터미널에서 호출
+# (팀 생성) 201 Created
+curl -i -X POST http://localhost:8080/teams \
+  -H "Content-Type: application/json" -d '{"name":"프론트 1팀"}'
+
+# (멤버 생성 + 팀 배정) teamId 로 연관관계 설정 — INSERT 시 FK(team_id) 반영
+curl -i -X POST http://localhost:8080/members \
+  -H "Content-Type: application/json" \
+  -d '{"name":"김백엔","email":"be@likelion.org","generation":13,"part":"BACKEND","teamId":1}'
+
+# (팀별 멤버 조회) 200 OK — WHERE team_id = ?
+curl http://localhost:8080/teams/1/members
+
+# (과제 생성) memberId 필수 — Member 1 : N Assignment
+curl -i -X POST http://localhost:8080/assignments \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Mission09","description":"연관관계 & 트랜잭션","memberId":1}'
+
+# (멤버별 과제 조회) 200 OK — WHERE member_id = ?
+curl http://localhost:8080/members/1/assignments
+```
+
+> DB 내용을 브라우저로 확인하려면 `http://localhost:8080/h2-console` 에서
+> JDBC URL `jdbc:h2:mem:mission09db`, 사용자명 `sa` 로 로그인한다.
+
+### 동작 검증 (이 저장소에서 직접 확인됨)
+
+JDK 17 + Maven Wrapper 환경에서 다음을 확인했다:
+
+| 단계 | 명령 / 요청 | 결과 |
+|---|---|---|
+| 컴파일·패키지 | `./mvnw clean package` | `BUILD SUCCESS` |
+| 부팅 | `java -jar target/mission09-*.jar` | `Started Mission09Application`, Tomcat 8080 |
+| FK DDL 생성 | 기동 로그 | `members.team_id` / `assignments.member_id` 에 `foreign key (...)` 제약 생성 |
+| 연관 시드 저장 | CommandLineRunner | Team 저장 한 번으로 cascade 하여 members·assignments INSERT (FK 포함) |
+| 팀별 멤버 조회 | `GET /teams/1/members` | `200 OK` — 팀 소속 멤버 2명(teamId=1) 반환 |
+| 멤버별 과제 조회 | `GET /members/1/assignments` | `200 OK` — 해당 멤버 과제 2건(memberId=1) 반환 |
+
+### 설계 포인트
+
+1. **연관관계의 주인은 FK 를 가진 N 쪽** — `Member`(team_id), `Assignment`(member_id)가 `@ManyToOne @JoinColumn` 으로 FK 를 소유한다. 반대편 1 쪽은 `@OneToMany(mappedBy=...)` 로 조회 뷰만 제공한다.
+2. **양방향 편의 메서드로 정합성 보장** — `Team.addMember` / `Member.addAssignment` 가 양쪽 참조를 함께 세팅해, 객체 그래프와 DB FK 불일치를 막는다.
+3. **`@Transactional` 로 원자성 확보** — `MemberService.create` 는 팀 조회·연관 설정·저장을 하나의 트랜잭션으로 묶는다. 팀이 없으면 전체 롤백된다. 조회는 클래스 레벨 `readOnly=true` 로 최적화한다.
+4. **연관관계 기반 조회 쿼리 메서드** — `findByTeamId` / `findByMemberId` 로 조인 없이 FK 기준 조회를 파생한다.
+5. **엔티티 직렬화 대신 DTO** — 양방향 연관관계를 그대로 직렬화하면 순환(Team ↔ Member)이 발생하므로, 응답은 `teamId`/`memberId` 등으로 평탄화한 DTO 로 고정한다.
