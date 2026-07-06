@@ -18,6 +18,7 @@
 | Mission 07 | REST API 설계 — Member CRUD / DTO·Entity 분리 / ResponseEntity | [src/mission07/](src/mission07/) |
 | Mission 08 | JPA 기초 & 영속성 컨텍스트 — Member CRUD 를 DB 에 연동 | [src/mission08/](src/mission08/) |
 | Mission 09 | 연관관계 & 트랜잭션 — Team·Member·Assignment 1:N 매핑 / @Transactional | [src/mission09/](src/mission09/) |
+| Mission 10 | 예외 처리 & FE 연동 — @RestControllerAdvice 전역 예외 처리 / 통일 에러 응답 / 검색 API / fetch() 프론트엔드 | [src/mission10/](src/mission10/) |
 
 ---
 
@@ -939,3 +940,188 @@ JDK 17 + Maven Wrapper 환경에서 다음을 확인했다:
 3. **`@Transactional` 로 원자성 확보** — `MemberService.create` 는 팀 조회·연관 설정·저장을 하나의 트랜잭션으로 묶는다. 팀이 없으면 전체 롤백된다. 조회는 클래스 레벨 `readOnly=true` 로 최적화한다.
 4. **연관관계 기반 조회 쿼리 메서드** — `findByTeamId` / `findByMemberId` 로 조인 없이 FK 기준 조회를 파생한다.
 5. **엔티티 직렬화 대신 DTO** — 양방향 연관관계를 그대로 직렬화하면 순환(Team ↔ Member)이 발생하므로, 응답은 `teamId`/`memberId` 등으로 평탄화한 DTO 로 고정한다.
+
+---
+
+## Mission 10 — 예외 처리 & FE 연동
+
+### 목표
+- **`@RestControllerAdvice`** 로 전역 예외 처리를 구현한다.
+- **커스텀 예외**와 **통일된 에러 응답 형식(`ErrorResponse`)** 을 정의한다.
+- Service 에서 **예외를 던지는 방식**으로 리팩토링한다.
+- **검색 기능 API** 를 추가한다.
+- 프론트엔드에서 **`fetch()`** 로 API 를 호출하여 **GET / POST / PUT / DELETE 가 브라우저에서 동작**하도록 연동한다.
+
+> **Mission08 과의 차이(이 미션의 핵심)**: Member CRUD(REST + JPA) 위에 ①전역 예외 처리 + 통일된 에러 응답,
+> ②이름·이메일 검색 API, ③`fetch()` 기반 프론트엔드(정적 `index.html`) 를 얹었다. 컨트롤러/서비스는
+> 실패 상황에서 예외만 던지고, 상태 코드 변환은 `GlobalExceptionHandler` 한 곳이 전담한다.
+
+### 프로젝트 위치 / 빌드 정보
+
+| 항목 | 값 |
+|---|---|
+| 위치 | [src/mission10/](src/mission10/) |
+| 빌드 도구 | Maven (`src/mission10/pom.xml`) |
+| Spring Boot | 3.3.5 |
+| Java | 17 |
+| DB | H2 (임베디드 — 별도 설치 불필요) |
+| 베이스 패키지 | `com.likelion.mission10` |
+| 프론트엔드 | `src/main/resources/static/index.html` (정적 페이지 + Vanilla JS `fetch()`) |
+
+### API 명세
+
+| 메서드 | URL | 설명 | 성공 코드 | 실패 코드 |
+|---|---|---|---|---|
+| `POST`   | `/members`                | 멤버 생성 | `201 Created` (+ `Location`) | `400` (검증 실패) |
+| `GET`    | `/members`                | 전체 조회 (`?part=BACKEND` 파트별) | `200 OK` | — |
+| `GET`    | `/members/search?keyword=`| **검색** (이름·이메일 부분 일치, 대소문자 무시) | `200 OK` | — |
+| `GET`    | `/members/{id}`           | 단건 조회 | `200 OK` | `404` |
+| `PUT`    | `/members/{id}`           | 멤버 수정 | `200 OK` | `400` / `404` |
+| `DELETE` | `/members/{id}`           | 멤버 삭제 | `204 No Content` | `404` |
+
+### 통일된 에러 응답 형식 (`ErrorResponse`)
+
+모든 실패 응답은 어떤 예외가 발생하든 항상 아래 한 가지 형식으로 내려간다.
+
+```json
+{
+  "status": 404,
+  "message": "해당 멤버를 찾을 수 없습니다: id=999",
+  "errors": [],
+  "timestamp": "2026-07-06T09:12:30.14"
+}
+```
+
+| 예외 | HTTP 상태 | 매핑 위치 |
+|---|---|---|
+| `MemberNotFoundException` (커스텀) | `404 Not Found` | `GlobalExceptionHandler#handleNotFound` |
+| `MethodArgumentNotValidException` (`@Valid` 실패) | `400 Bad Request` (+ 필드별 `errors`) | `#handleValidation` |
+| `HttpMessageNotReadableException` (깨진 JSON / 잘못된 enum) | `400 Bad Request` | `#handleNotReadable` |
+| `IllegalArgumentException` (도메인 불변식 위반) | `400 Bad Request` | `#handleIllegalArgument` |
+| 그 밖의 예상치 못한 예외 | `500 Internal Server Error` | `#handleUnexpected` |
+
+### 패키지 구조
+
+```
+src/mission10/
+├── pom.xml                              ▶ web + data-jpa + validation + H2
+└── src/main/
+    ├── resources/
+    │   ├── application.properties        ▶ DB 연결 + ddl-auto + Hibernate SQL 로그
+    │   └── static/
+    │       └── index.html                ▶ ★ 프론트엔드 — fetch() 로 CRUD·검색 호출/표시
+    └── java/com/likelion/mission10/
+        ├── Mission10Application.java     ▶ @SpringBootApplication + CommandLineRunner(시드 3명)
+        ├── domain/
+        │   ├── Member.java               ▶ @Entity, 불변식 위반 시 IllegalArgumentException
+        │   └── Part.java                 ▶ (enum) BACKEND / FRONTEND / DESIGN
+        ├── dto/
+        │   ├── MemberCreateRequest.java  ▶ 생성 요청 DTO (@Valid)
+        │   ├── MemberUpdateRequest.java  ▶ 수정 요청 DTO
+        │   ├── MemberResponse.java       ▶ 응답 DTO
+        │   └── ErrorResponse.java        ▶ ★ 통일된 에러 응답 (status/message/errors/timestamp)
+        ├── repository/
+        │   └── MemberRepository.java     ▶ JpaRepository + ★ 검색 쿼리 메서드
+        ├── service/
+        │   └── MemberService.java        ▶ ★ 예외를 던지는 방식 + search()
+        ├── controller/
+        │   └── MemberController.java     ▶ @RestController + ★ GET /members/search
+        └── exception/
+            ├── MemberNotFoundException.java   ▶ ★ 커스텀 예외
+            └── GlobalExceptionHandler.java    ▶ ★ @RestControllerAdvice 전역 예외 처리
+```
+
+### 체크리스트 ↔ 코드 매핑
+
+| 체크리스트 | 구현 위치 |
+|---|---|
+| `@RestControllerAdvice` 로 전역 예외 처리가 구현되었는가 | [GlobalExceptionHandler.java](src/mission10/src/main/java/com/likelion/mission10/exception/GlobalExceptionHandler.java) — `@RestControllerAdvice` + `@ExceptionHandler` 5종 |
+| 커스텀 예외 클래스가 정의되어 있는가 | [MemberNotFoundException.java](src/mission10/src/main/java/com/likelion/mission10/exception/MemberNotFoundException.java) — `extends RuntimeException` |
+| 통일된 에러 응답 형식(ErrorResponse 등)이 사용되는가 | [ErrorResponse.java](src/mission10/src/main/java/com/likelion/mission10/dto/ErrorResponse.java) — `status / message / errors / timestamp`, 모든 핸들러가 이 타입을 반환 |
+| Service 에서 예외를 던지는 방식으로 리팩토링되었는가 | [MemberService.java](src/mission10/src/main/java/com/likelion/mission10/service/MemberService.java) — `findById`/`delete` 에서 `throw new MemberNotFoundException(id)` |
+| 검색 기능 API 가 추가되었는가 | [MemberController.java](src/mission10/src/main/java/com/likelion/mission10/controller/MemberController.java) `GET /members/search` → [MemberRepository](src/mission10/src/main/java/com/likelion/mission10/repository/MemberRepository.java) `findByNameContainingIgnoreCaseOrEmailContainingIgnoreCase` |
+| 프론트엔드에서 fetch() 로 API 를 호출하고 결과를 표시하는가 | [index.html](src/mission10/src/main/resources/static/index.html) — `fetch(API...)` 로 조회/검색 후 `render()` 로 테이블 표시, 실패 시 `ErrorResponse.message` 표시 |
+| GET/POST/PUT/DELETE 가 브라우저에서 동작하는가 | [index.html](src/mission10/src/main/resources/static/index.html) — 등록(POST)·수정(PUT)·삭제(DELETE)·조회/검색(GET) 버튼 → `fetch()` 호출 |
+| GitHub README.md 에 본인 이름이 포함되었는가 | 본 문서 최상단 "**작성자: 노경민**" (+ 프론트엔드 화면 헤더/푸터에도 표기) |
+
+### 전역 예외 처리 (이 미션의 핵심)
+
+```java
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    // 커스텀 예외 → 404
+    @ExceptionHandler(MemberNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(MemberNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse(404, e.getMessage()));
+    }
+
+    // @Valid 검증 실패 → 400 (+ 필드별 메시지)
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException e) { ... }
+}
+```
+
+- **컨트롤러/서비스에 try-catch 가 없다** — 서비스는 예외를 던지기만 하고, 상태 코드 변환은 전역 핸들러 한 곳이 전담한다.
+- **응답 계약이 고정된다** — 어떤 예외든 `ErrorResponse(status/message/errors/timestamp)` 형식으로만 내려가므로, 프론트엔드는 `data.message` 하나로 모든 실패를 일관되게 표시할 수 있다.
+
+### 프론트엔드 연동 (fetch 기반 CRUD)
+
+```javascript
+// [C] 생성 — POST /members  /  [U] 수정 — PUT /members/{id}
+const res = await fetch(editing ? (API + '/' + id) : API, {
+    method: editing ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+});
+await handle(res); // 실패면 ErrorResponse.message 를 읽어 사용자에게 표시
+
+// [R] 검색 — GET /members/search?keyword=
+const res = await fetch(API + '/search?keyword=' + encodeURIComponent(keyword));
+```
+
+- 정적 리소스(`static/index.html`)로 서빙되어, 서버 기동 후 `http://localhost:8080/` 로 바로 접속된다(별도 프론트 서버 불필요).
+- 실패 응답의 통일된 `ErrorResponse.message` / `errors` 를 화면 상단에 그대로 노출한다(404·400 모두 동일 흐름).
+
+### 실행 방법
+
+```bash
+# 1) mission10 디렉터리로 이동
+cd src/mission10
+
+# 2) Spring Boot 실행 (Maven Wrapper — JDK 17 만 필요)
+#    Windows PowerShell:  .\mvnw.cmd spring-boot:run
+#    macOS / Linux:       ./mvnw spring-boot:run
+
+# 3) 브라우저에서 프론트엔드 접속 (CRUD & 검색 화면)
+#    http://localhost:8080/
+
+# (참고) 터미널에서 직접 호출도 가능
+curl "http://localhost:8080/members/search?keyword=백엔"   # 검색
+curl -i http://localhost:8080/members/999                  # 404 + 통일 에러 응답
+```
+
+### 동작 검증 (이 저장소에서 직접 확인됨)
+
+JDK 17 + Maven Wrapper 환경에서 `./mvnw clean package` (`BUILD SUCCESS`) 후 `java -jar` 로 기동하여 다음을 확인했다:
+
+| 단계 | 요청 | 결과 |
+|---|---|---|
+| 부팅 | `java -jar target/mission10-*.jar` | `Started Mission10Application`, Tomcat 8080, 시드 3명 저장 |
+| 프론트 서빙 | `GET /` | `200 OK` — `index.html`(fetch 기반 CRUD 화면) 반환 |
+| 전체 조회 | `GET /members` | `200 OK` + 멤버 배열 |
+| 생성 | `POST /members` | `201 Created` + `Location: /members/4` |
+| 검색 | `GET /members/search?keyword=노` | `200 OK` — 이름에 "노" 포함 멤버 1건 |
+| 수정 | `PUT /members/4` | `200 OK` + 갱신된 JSON |
+| 삭제 | `DELETE /members/4` | `204 No Content` |
+| 없는 id | `GET /members/999` | `404` + `{"status":404,"message":"해당 멤버를 찾을 수 없습니다: id=999","errors":[],...}` |
+| 검증 실패 | `POST /members` (빈 이름 / 잘못된 이메일 / 기수 0 / 파트 누락) | `400` + `errors` 필드별 메시지 4건 |
+
+### 설계 포인트
+
+1. **예외 처리의 중앙화** — `@RestControllerAdvice` 한 곳에서 커스텀 예외(404)·검증 실패(400)·파싱 오류(400)·불변식 위반(400)·기타(500)를 매핑한다. 컨트롤러/서비스는 정상 흐름과 예외 던지기에만 집중한다.
+2. **통일된 에러 응답 계약** — 모든 실패가 `ErrorResponse(status/message/errors/timestamp)` 로 고정되어, 클라이언트(프론트엔드)가 실패를 일관되게 처리한다.
+3. **서비스는 예외를 던진다** — `findById`/`delete` 는 boolean/null 대신 `MemberNotFoundException` 을 던져, "없음" 을 호출 측이 놓칠 수 없게 한다(누락 시 500 이 아니라 명확한 404).
+4. **검색 API** — `findByNameContainingIgnoreCaseOrEmailContainingIgnoreCase` 쿼리 메서드로 이름·이메일 부분 일치 검색을 파생한다(직접 SQL 없이).
+5. **프론트-백 연동** — 정적 `index.html` 이 `fetch()` 로 GET/POST/PUT/DELETE 를 호출하고, 성공·실패(통일 에러 응답)를 화면에 표시한다 — 브라우저만으로 전체 CRUD 시연이 가능하다.
